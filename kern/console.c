@@ -157,20 +157,86 @@ cga_init(void)
 	crt_pos = pos;
 }
 
-
+static int ansi_state = 0;
+static uint8_t attr = 0x07;
+static int params[20];
+static int num;
+static const uint8_t ansi_to_vga_color_map[8] = { 0, 4, 2, 6, 1, 5, 3, 7 };
 
 static void
 cga_putc(int c)
 {
+	uint8_t ch = c & 0xFF;
+	if(ansi_state == 0){
+		if(ch == '\x1b'){
+			ansi_state = 1;
+			return;
+		}
+	}
+	else if(ansi_state == 1){
+		if(ch == '['){
+			ansi_state=2;
+			num=0;
+			for(int i=0;i<20;i++){
+				params[i]=0;
+			}
+		}
+		else{
+			ansi_state=0;
+		}
+		return;
+	}
+	else if(ansi_state == 2){
+		if(ch>='0'&&ch<='9'){
+			params[num]=params[num]*10+(ch-'0');
+			ansi_state=3;
+		}
+		else{
+			ansi_state=0;
+			return;
+		}
+		return;
+	}
+	else if(ansi_state == 3){
+		if(ch>='0'&&ch<='9'){
+			params[num]=params[num]*10+(ch-'0');
+		}
+		else if(ch == ';'){
+			num++;
+		}
+		else if(ch == 'm'){
+			for(int i=0;i<=num;i++){
+				int code = params[i];
+				if(code==0){
+					attr = 0x07;
+				}
+				if(code==1){
+					attr |= 0x08;
+				}
+				if (code >= 30 && code <= 37) {
+					uint8_t vga_color = ansi_to_vga_color_map[code - 30];
+					attr = (attr & 0xF8) | vga_color;
+				}
+				if (code >= 40 && code <= 47) {
+					uint8_t vga_color = ansi_to_vga_color_map[code - 40];
+                    attr = (attr & 0x8F) | (vga_color << 4);
+				}
+			}
+			ansi_state = 0;
+		}
+		else{
+			ansi_state=0;
+		}
+		return;
+	}
 	// if no attribute given, then use black on white
 	if (!(c & ~0xFF))
-		c |= 0x0700;
-
+		c |= (attr << 8);
 	switch (c & 0xff) {
 	case '\b':
 		if (crt_pos > 0) {
 			crt_pos--;
-			crt_buf[crt_pos] = (c & ~0xff) | ' ';
+			crt_buf[crt_pos] = (attr<<8) | ' ';
 		}
 		break;
 	case '\n':

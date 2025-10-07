@@ -29,6 +29,22 @@ i386_init(void)
 	// Lab 2 memory management initialization functions
 	mem_init();
 
+	//样例
+    cprintf("--- Example 1: Red ---\n");
+    cprintf("\x1b[31mThis is an error message.\x1b[0m\n\n");
+
+    cprintf("--- Example 2: Green ---\n");
+    cprintf("\x1b[32mOperation successful!\x1b[0m\n\n");
+
+    cprintf("--- Example 3: Blue ---\n");
+    cprintf("This is an important link: \x1b[34mhttps://example.com\x1b[0m\n\n");
+
+	cprintf("--- Example 4: Background Color ---\n");
+    cprintf("Current Status: \x1b[44;37m PROCESSING \x1b[0m\n\n");
+
+	cprintf("--- Example 5: Mixed Usage ---\n");
+    cprintf("Log: [\x1b[32mINFO\x1b[0m] User login successful | [\x1b[1;31mALERT\x1b[0m] Password expiring soon.\n");
+
 	// Drop into the kernel monitor.
 	while (1)
 		monitor(NULL);

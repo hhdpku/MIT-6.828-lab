@@ -10,6 +10,7 @@
 #include <kern/console.h>
 #include <kern/monitor.h>
 #include <kern/kdebug.h>
+#include <kern/pmap.h>
 
 #define CMDBUF_SIZE	80	// enough for one VGA text line
 
@@ -25,6 +26,10 @@ static struct Command commands[] = {
 	{ "help", "Display this list of commands", mon_help },
 	{ "kerninfo", "Display information about the kernel", mon_kerninfo },
 	{ "backtrace", "Display a backtrace of the function stack", mon_backtrace },
+	{ "showmappings", "Display page mappings for a virtual address range", mon_showmappings },
+    { "setperm", "Set permissions for a virtual address mapping", mon_setperm },
+    { "dumpvmem", "Dump virtual memory content", mon_dumpvmem },
+    { "dumppmem", "Dump physical memory content", mon_dumppmem }
 };
 
 /***** Implementations of basic kernel monitor commands *****/
@@ -77,7 +82,101 @@ mon_backtrace(int argc, char **argv, struct Trapframe *tf)
 	return 0;
 }
 
-
+int mon_showmappings(int argc, char **argv, struct Trapframe *tf){
+	if(argc!=3){
+		cprintf("Usage:showmappings <start_va> <end_va>\n");
+	}
+	uintptr_t start_va = strtol(argv[1], NULL, 16);
+    uintptr_t end_va = strtol(argv[2], NULL, 16);
+	start_va = ROUNDDOWN(start_va, PGSIZE);
+    end_va = ROUNDUP(end_va, PGSIZE);
+	cprintf("VA         -> PA         | Permissions\n");
+    cprintf("------------------------+-----------\n");
+	for(uintptr_t va = start_va; va <= end_va; va += PGSIZE){
+		pte_t *pte = pgdir_walk(kern_pgdir, (void *)va, 0);
+		cprintf("0x%08x -> ", va);
+		if(pte && (*pte & PTE_P)){
+			physaddr_t pa = PTE_ADDR(*pte);
+			cprintf("0x%08x | ", pa);
+			cprintf("%c", (*pte & PTE_P) ? 'P' : '-');
+            cprintf("%c", (*pte & PTE_W) ? 'W' : '-');
+            cprintf("%c", (*pte & PTE_U) ? 'U' : '-'); 
+		}
+		else{
+			cprintf("--- not mapped --- ");
+		}
+		cprintf("\n");
+	}
+	return 0;
+}
+int mon_setperm(int argc, char **argv, struct Trapframe *tf){
+    if (argc != 3) {
+        cprintf("Usage: setperm <va> <permissions>\n");
+        cprintf("Permissions: P=1, W=2, U=4. Combine them for desired value (e.g., P|W|U = 7).\n");
+        return 0;
+    }
+	uintptr_t va = strtol(argv[1], NULL, 16);
+    int perms = strtol(argv[2], NULL, 16);
+	pte_t *pte = pgdir_walk(kern_pgdir, (void *)va, 0);
+	if (!pte || !(*pte & PTE_P)) {
+        cprintf("Error: virtual address 0x%x is not mapped.\n", va);
+        return 0;
+    }
+	else{
+		*pte = (*pte & ~0xFFF) | (perms & 0xFFF)| PTE_P;
+		tlb_invalidate(kern_pgdir, (void *)va);
+		cprintf("Permissions for VA 0x%x updated.\n", va);
+	}
+	return 0;
+}
+int mon_dumpvmem(int argc, char **argv, struct Trapframe *tf){
+	if(argc!=3){
+		cprintf("Usage:dumpvmem <va> <length>\n");
+		return 0;
+	}
+	uintptr_t va = strtol(argv[1], NULL, 16);
+    int len = strtol(argv[2], NULL, 10);
+	for (int i=0;i<len;i++){
+		pte_t *pte = pgdir_walk(kern_pgdir, (void *)(va+i), 0);
+		if (!pte || !(*pte & PTE_P)) {
+            cprintf("Address 0x%x is not mapped. Stopping dump.\n", va + i);
+            break;
+        }
+		if (i % 16 == 0) {
+			if(i!=0){
+				cprintf("\n");
+			}
+            cprintf("0x%08x: ", va + i);
+        }
+		cprintf("%02x ", *((unsigned char *)va + i));
+	}
+	cprintf("\n");
+	return 0;
+}
+int mon_dumppmem(int argc, char **argv, struct Trapframe *tf){
+	if(argc!=3){
+		cprintf("Usage:dumppmem <va> <length>\n");
+		return 0;
+	}
+	physaddr_t pa = strtol(argv[1], NULL, 16);
+    int len = strtol(argv[2], NULL, 10);
+	if (pa >= npages * PGSIZE) {
+        cprintf("Error: Physical address out of bounds.\n");
+        return 0;
+    }
+	uintptr_t va = (uintptr_t)KADDR(pa);
+	for (int i=0;i<len;i++){
+		if (i % 16 == 0) {
+			if(i!=0){
+				cprintf("\n");
+			}
+            cprintf("0x%08x: ", pa + i);
+        }
+        cprintf("%02x ", *((unsigned char *)va + i));
+	}
+	cprintf("\n");
+    return 0;
+}
 
 /***** Kernel monitor command interpreter *****/
 
